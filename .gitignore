@@ -3,6 +3,6 @@
 /facenet-pytorch/
 /.cursor/
 *.ipynb
-/test/
+# /test/
 __pycache__/
 *.pyc
