@@ -166,7 +166,7 @@ class InferenceEngine:
     
     def process_multiple_images(self, images: List[np.ndarray]) -> MultiImageResult:
         """
-        Process multiple images for student insertion without voting
+        Process multiple images for student insertion
         Simply requires 3 successfully embedded images (face detected and real)
         
         Args:
