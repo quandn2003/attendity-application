@@ -4,6 +4,8 @@ from typing import List, Tuple, Optional, Dict, Any
 import logging
 from dataclasses import dataclass
 
+from ai.models.face_detection.ssd_resnet import SsdResNetDetector, FacialAreaRegion
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -19,7 +21,7 @@ class FaceDetectionResult:
 class FacePreprocessor:
     """
     Face detection and preprocessing optimized for mobile CPU deployment
-    Uses lightweight SSD MobileNet for face detection
+    Uses SSD ResNet for accurate face detection
     """
     
     def __init__(self, 
@@ -41,17 +43,14 @@ class FacePreprocessor:
         self._load_face_detector()
     
     def _load_face_detector(self):
-        """Load lightweight face detection model optimized for CPU"""
+        """Load SSD ResNet face detection model optimized for CPU"""
         try:
-            # Use OpenCV's DNN face detector (SSD MobileNet)
-            model_file = "opencv_face_detector_uint8.pb"
-            config_file = "opencv_face_detector.pbtxt"
-            
-            # For now, use Haar cascades as fallback (lightweight)
-            self.face_detector = cv2.CascadeClassifier(
-                cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            self.face_detector = SsdResNetDetector(
+                confidence_threshold=self.confidence_threshold,
+                nms_threshold=0.4,
+                input_size=(300, 300)
             )
-            logger.info("Loaded Haar cascade face detector for CPU optimization")
+            logger.info("SSD ResNet face detector loaded successfully")
             
         except Exception as e:
             logger.error(f"Error loading face detector: {e}")
@@ -59,7 +58,7 @@ class FacePreprocessor:
     
     def detect_faces(self, image: np.ndarray) -> List[FaceDetectionResult]:
         """
-        Detect faces in image using CPU-optimized detector
+        Detect faces in image using SSD ResNet detector
         
         Args:
             image: Input image as numpy array (BGR format)
@@ -71,30 +70,26 @@ class FacePreprocessor:
             raise ValueError("Face detector not loaded")
         
         try:
-            # Convert to grayscale for Haar cascade
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            # Preprocess image for detection
+            processed_img = self.face_detector.preprocess_image(image)
             
-            # Detect faces
-            faces = self.face_detector.detectMultiScale(
-                gray,
-                scaleFactor=1.1,
-                minNeighbors=5,
-                minSize=(30, 30),
-                flags=cv2.CASCADE_SCALE_IMAGE
-            )
+            # Detect faces using SSD ResNet
+            facial_areas = self.face_detector.detect_faces(processed_img)
             
             results = []
-            for i, (x, y, w, h) in enumerate(faces[:self.max_faces]):
+            for i, facial_area in enumerate(facial_areas[:self.max_faces]):
                 # Extract face region
-                face_image = image[y:y+h, x:x+w]
+                face_image = self.face_detector.extract_face(
+                    image, facial_area, target_size=None
+                )
                 
-                # Calculate confidence (simplified for Haar cascade)
-                confidence = 0.9  # Haar cascade doesn't provide confidence
-                
-                if confidence >= self.confidence_threshold:
+                if face_image.size > 0:
                     result = FaceDetectionResult(
-                        x=int(x), y=int(y), w=int(w), h=int(h),
-                        confidence=confidence,
+                        x=facial_area.x,
+                        y=facial_area.y,
+                        w=facial_area.w,
+                        h=facial_area.h,
+                        confidence=facial_area.confidence or 0.9,
                         face_image=face_image
                     )
                     results.append(result)
@@ -230,7 +225,7 @@ class FacePreprocessor:
                 "brightness": float(brightness),
                 "contrast": float(contrast),
                 "size": (width, height),
-                "quality_score": float(laplacian_var * contrast / 1000)  # Combined score
+                "quality_score": float(laplacian_var * contrast / 1000)
             }
             
         except Exception as e:
@@ -239,6 +234,71 @@ class FacePreprocessor:
                 "is_valid": False,
                 "error": str(e)
             }
+    
+    def extract_faces_with_alignment(self, image: np.ndarray, 
+                                   align: bool = True,
+                                   expand_percentage: int = 0) -> List[Dict[str, Any]]:
+        """
+        Extract faces with optional alignment (DeepFace compatible)
+        
+        Args:
+            image: Input image
+            align: Whether to align faces
+            expand_percentage: Expand face region by percentage
+            
+        Returns:
+            List of face extraction results
+        """
+        try:
+            face_results = self.detect_faces(image)
+            
+            extracted_faces = []
+            for face_result in face_results:
+                # Get facial area
+                facial_area = FacialAreaRegion(
+                    x=face_result.x,
+                    y=face_result.y,
+                    w=face_result.w,
+                    h=face_result.h,
+                    confidence=face_result.confidence
+                )
+                
+                # Extract face with optional expansion
+                if expand_percentage > 0:
+                    expanded_w = int(face_result.w * (1 + expand_percentage / 100))
+                    expanded_h = int(face_result.h * (1 + expand_percentage / 100))
+                    
+                    new_x = max(0, face_result.x - (expanded_w - face_result.w) // 2)
+                    new_y = max(0, face_result.y - (expanded_h - face_result.h) // 2)
+                    
+                    facial_area.x = new_x
+                    facial_area.y = new_y
+                    facial_area.w = min(image.shape[1] - new_x, expanded_w)
+                    facial_area.h = min(image.shape[0] - new_y, expanded_h)
+                
+                face_img = self.face_detector.extract_face(image, facial_area)
+                
+                # Preprocess face
+                preprocessed_face = self.preprocess_face(face_img)
+                
+                result = {
+                    "face": preprocessed_face,
+                    "facial_area": {
+                        "x": facial_area.x,
+                        "y": facial_area.y,
+                        "w": facial_area.w,
+                        "h": facial_area.h
+                    },
+                    "confidence": facial_area.confidence or 0.9
+                }
+                
+                extracted_faces.append(result)
+            
+            return extracted_faces
+            
+        except Exception as e:
+            logger.error(f"Error extracting faces with alignment: {e}")
+            return []
     
     def get_face_landmarks(self, face_image: np.ndarray) -> Optional[np.ndarray]:
         """
@@ -251,9 +311,6 @@ class FacePreprocessor:
             Face landmarks array or None if detection fails
         """
         try:
-            # For mobile optimization, we'll use a simplified approach
-            # In a full implementation, you would use dlib or MediaPipe
-            
             # Convert to grayscale
             if len(face_image.shape) == 3:
                 gray = cv2.cvtColor(face_image, cv2.COLOR_RGB2GRAY)
@@ -285,9 +342,14 @@ class FacePreprocessor:
     
     def get_processor_stats(self) -> Dict[str, Any]:
         """Get processor statistics and configuration"""
+        detector_info = {}
+        if self.face_detector:
+            detector_info = self.face_detector.get_detector_info()
+        
         return {
             "confidence_threshold": self.confidence_threshold,
             "target_size": self.target_size,
             "max_faces": self.max_faces,
-            "detector_loaded": self.face_detector is not None
+            "detector_loaded": self.face_detector is not None,
+            "detector_info": detector_info
         } 

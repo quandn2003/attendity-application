@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from ai.models.facenet_model import FaceNetModel, ModelConfig
 from ai.utils.preprocessing import FacePreprocessor
 from ai.utils.anti_spoofing import AntiSpoofingDetector, AntiSpoofingResult
-from ai.utils.voting import VotingSystem, VotingResult
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,6 @@ class MultiImageResult:
     """Result of multi-image processing for student insertion"""
     success: bool
     consensus_embedding: Optional[np.ndarray]
-    voting_result: Optional[VotingResult]
     individual_results: List[InferenceResult]
     total_processing_time: float
     error_message: Optional[str]
@@ -41,25 +39,21 @@ class InferenceEngine:
     
     def __init__(self, 
                  model_config: Optional[ModelConfig] = None,
-                 enable_anti_spoofing: bool = True,
-                 enable_voting: bool = True):
+                 enable_anti_spoofing: bool = True):
         """
         Initialize inference engine
         
         Args:
             model_config: Configuration for FaceNet model
             enable_anti_spoofing: Whether to enable anti-spoofing detection
-            enable_voting: Whether to enable voting system for multi-image processing
         """
         self.model_config = model_config or ModelConfig()
         self.enable_anti_spoofing = enable_anti_spoofing
-        self.enable_voting = enable_voting
         
         # Initialize components
         self.face_model = None
         self.preprocessor = None
         self.anti_spoofing_detector = None
-        self.voting_system = None
         
         self._initialize_components()
     
@@ -81,11 +75,6 @@ class InferenceEngine:
             if self.enable_anti_spoofing:
                 self.anti_spoofing_detector = AntiSpoofingDetector()
                 logger.info("Anti-spoofing detector initialized")
-            
-            # Initialize voting system
-            if self.enable_voting:
-                self.voting_system = VotingSystem()
-                logger.info("Voting system initialized")
                 
         except Exception as e:
             logger.error(f"Error initializing components: {e}")
@@ -177,7 +166,8 @@ class InferenceEngine:
     
     def process_multiple_images(self, images: List[np.ndarray]) -> MultiImageResult:
         """
-        Process multiple images for student insertion with voting
+        Process multiple images for student insertion without voting
+        Simply requires 3 successfully embedded images (face detected and real)
         
         Args:
             images: List of input images (typically 3 for student insertion)
@@ -192,7 +182,6 @@ class InferenceEngine:
                 return MultiImageResult(
                     success=False,
                     consensus_embedding=None,
-                    voting_result=None,
                     individual_results=[],
                     total_processing_time=time.time() - start_time,
                     error_message=f"Expected 3 images, got {len(images)}"
@@ -206,55 +195,32 @@ class InferenceEngine:
                 result = self.process_single_image(image)
                 individual_results.append(result)
                 
-                if result.success and result.embedding is not None:
+                if result.success and result.embedding is not None and result.is_real:
                     valid_embeddings.append(result.embedding)
                 else:
                     logger.warning(f"Image {i+1} processing failed: {result.error_message}")
             
-            # Check if we have enough valid embeddings
-            if len(valid_embeddings) < 2:
+            # Check if we have exactly 3 valid embeddings (face detected and real)
+            if len(valid_embeddings) != 3:
                 return MultiImageResult(
                     success=False,
                     consensus_embedding=None,
-                    voting_result=None,
                     individual_results=individual_results,
                     total_processing_time=time.time() - start_time,
-                    error_message=f"Insufficient valid embeddings: {len(valid_embeddings)}/3"
+                    error_message=f"Need exactly 3 valid embeddings (face detected and real), got {len(valid_embeddings)}/3"
                 )
             
-            # Apply voting system if enabled
-            voting_result = None
-            consensus_embedding = None
+            # Create consensus embedding by averaging the 3 valid embeddings
+            consensus_embedding = np.mean(valid_embeddings, axis=0)
             
-            if self.enable_voting and self.voting_system:
-                if len(valid_embeddings) == 3:
-                    voting_result = self.voting_system.process_three_images(valid_embeddings)
-                else:
-                    voting_result = self.voting_system.validate_consistency(valid_embeddings)
-                
-                if voting_result.is_consistent:
-                    consensus_embedding = voting_result.consensus_embedding
-                else:
-                    return MultiImageResult(
-                        success=False,
-                        consensus_embedding=None,
-                        voting_result=voting_result,
-                        individual_results=individual_results,
-                        total_processing_time=time.time() - start_time,
-                        error_message=f"Inconsistent faces detected: {voting_result.reason}"
-                    )
-            else:
-                # Simple average if voting is disabled
-                consensus_embedding = np.mean(valid_embeddings, axis=0)
-                # Normalize
-                norm = np.linalg.norm(consensus_embedding)
-                if norm > 0:
-                    consensus_embedding = consensus_embedding / norm
+            # Normalize the consensus embedding
+            norm = np.linalg.norm(consensus_embedding)
+            if norm > 0:
+                consensus_embedding = consensus_embedding / norm
             
             return MultiImageResult(
                 success=True,
                 consensus_embedding=consensus_embedding,
-                voting_result=voting_result,
                 individual_results=individual_results,
                 total_processing_time=time.time() - start_time,
                 error_message=None
@@ -265,7 +231,6 @@ class InferenceEngine:
             return MultiImageResult(
                 success=False,
                 consensus_embedding=None,
-                voting_result=None,
                 individual_results=[],
                 total_processing_time=time.time() - start_time,
                 error_message=str(e)
@@ -403,8 +368,7 @@ class InferenceEngine:
             "components": {
                 "face_model_loaded": self.face_model is not None and self.face_model.model is not None,
                 "preprocessor_loaded": self.preprocessor is not None,
-                "anti_spoofing_enabled": self.enable_anti_spoofing,
-                "voting_enabled": self.enable_voting
+                "anti_spoofing_enabled": self.enable_anti_spoofing
             },
             "model_info": self.face_model.get_model_info() if self.face_model else {}
         } 
