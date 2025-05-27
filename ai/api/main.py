@@ -7,6 +7,7 @@ import cv2
 import logging
 import time
 import base64
+import httpx
 
 from ai.inference.engine import InferenceEngine
 from ai.models.facenet_model import ModelConfig
@@ -218,6 +219,46 @@ async def insert_student(request: MultiImageRequest):
             individual_results.append(individual_data)
         
         if result.success:
+            # Insert student data into vector database
+            try:
+                async with httpx.AsyncClient() as client:
+                    vector_db_payload = {
+                        "students": [{
+                            "student_id": request.student_id,
+                            "class_code": request.class_code,
+                            "embedding": result.consensus_embedding.tolist()
+                        }]
+                    }
+                    
+                    response = await client.post(
+                        "http://localhost:8001/insert_student",
+                        json=vector_db_payload,
+                        timeout=30.0
+                    )
+                    
+                    if response.status_code != 200:
+                        logger.error(f"Failed to insert student into vector DB: {response.text}")
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Failed to insert student into database: {response.text}"
+                        )
+                    
+                    db_response = response.json()
+                    logger.info(f"Successfully inserted student {request.student_id} into vector DB")
+                    
+            except httpx.RequestError as e:
+                logger.error(f"Network error when inserting student: {e}")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Vector database service unavailable"
+                )
+            except Exception as e:
+                logger.error(f"Error inserting student into vector DB: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to insert student: {str(e)}"
+                )
+            
             return MultiImageResponse(
                 consensus_embedding=result.consensus_embedding.tolist(),
                 individual_results=individual_results,

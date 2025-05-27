@@ -49,7 +49,7 @@ def main():
         processes.append(("AI Module", ai_process))
         time.sleep(2)
         
-        vectordb_process = run_api("vector-db.api.main", 8001, "Vector-DB Module")
+        vectordb_process = run_api("vector_db.api.main", 8001, "Vector-DB Module")
         processes.append(("Vector-DB Module", vectordb_process))
         time.sleep(2)
         
