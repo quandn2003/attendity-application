@@ -5,10 +5,10 @@ import logging
 import time
 from dataclasses import dataclass
 
-from ..models.facenet_model import FaceNetModel, ModelConfig
-from ..utils.preprocessing import FacePreprocessor
-from ..utils.anti_spoofing import AntiSpoofingDetector, AntiSpoofingResult
-from ..utils.voting import VotingSystem, VotingResult
+from ai.models.facenet_model import FaceNetModel, ModelConfig
+from ai.utils.preprocessing import FacePreprocessor
+from ai.utils.anti_spoofing import AntiSpoofingDetector, AntiSpoofingResult
+from ai.utils.voting import VotingSystem, VotingResult
 
 logger = logging.getLogger(__name__)
 

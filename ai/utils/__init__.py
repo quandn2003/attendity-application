@@ -3,8 +3,8 @@ AI Utils Module
 Contains preprocessing, anti-spoofing, and utility functions for mobile CPU optimization.
 """
 
-from .preprocessing import FacePreprocessor
-from .anti_spoofing import AntiSpoofingDetector
-from .voting import VotingSystem
+from ai.utils.preprocessing import FacePreprocessor
+from ai.utils.anti_spoofing import AntiSpoofingDetector
+from ai.utils.voting import VotingSystem
 
 __all__ = ["FacePreprocessor", "AntiSpoofingDetector", "VotingSystem"] 

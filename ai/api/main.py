@@ -1,15 +1,16 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import numpy as np
 import cv2
 import logging
 import time
+import base64
 from io import BytesIO
 
-from ..inference.engine import InferenceEngine
-from ..models.facenet_model import ModelConfig
+from ai.inference.engine import InferenceEngine
+from ai.models.facenet_model import ModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,19 @@ app.add_middleware(
 
 # Global inference engine
 inference_engine: Optional[InferenceEngine] = None
+
+# Pydantic models for requests
+class ImageRequest(BaseModel):
+    """Request model for single image"""
+    image: str = Field(..., description="Base64 encoded image (without data:image prefix)")
+
+class MultiImageRequest(BaseModel):
+    """Request model for multiple images"""
+    class_code: str = Field(..., min_length=1, max_length=50, description="Class identifier")
+    student_id: str = Field(..., min_length=1, max_length=50, description="Student identifier")
+    image1: str = Field(..., description="Base64 encoded image 1 (without data:image prefix)")
+    image2: str = Field(..., description="Base64 encoded image 2 (without data:image prefix)")
+    image3: str = Field(..., description="Base64 encoded image 3 (without data:image prefix)")
 
 class EmbeddingResponse(BaseModel):
     embedding: List[float]
@@ -95,10 +109,252 @@ def load_image_from_upload(file: UploadFile) -> np.ndarray:
         logger.error(f"Error loading image: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid image file: {str(e)}")
 
+def load_image_from_base64(base64_string: str) -> np.ndarray:
+    """Load image from base64 string"""
+    try:
+        # Remove data URL prefix if present
+        if base64_string.startswith('data:image'):
+            base64_string = base64_string.split(',')[1]
+        
+        # Decode base64 string
+        image_data = base64.b64decode(base64_string)
+        
+        # Convert to numpy array
+        nparr = np.frombuffer(image_data, np.uint8)
+        
+        # Decode image
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if image is None:
+            raise ValueError("Could not decode base64 image")
+        
+        return image
+        
+    except Exception as e:
+        logger.error(f"Error loading base64 image: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid base64 image: {str(e)}")
+
+# Primary endpoints (base64)
 @app.post("/inference", response_model=EmbeddingResponse)
-async def extract_embedding(file: UploadFile = File(...)):
+async def extract_embedding(request: ImageRequest):
     """
-    Extract face embedding from single image with anti-spoofing
+    Extract face embedding from image with anti-spoofing
+    
+    - **request**: ImageRequest with base64 encoded image
+    - Returns face embedding, confidence, and anti-spoofing result
+    """
+    if inference_engine is None:
+        raise HTTPException(status_code=503, detail="Inference engine not initialized")
+    
+    try:
+        # Load image from base64
+        image = load_image_from_base64(request.image)
+        
+        # Process image
+        result = inference_engine.process_single_image(image)
+        
+        if not result.success:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Processing failed: {result.error_message}"
+            )
+        
+        # Prepare anti-spoofing details
+        anti_spoofing_details = None
+        if result.anti_spoofing_result:
+            anti_spoofing_details = {
+                "is_real": result.anti_spoofing_result.is_real,
+                "confidence": result.anti_spoofing_result.confidence,
+                "reason": result.anti_spoofing_result.reason,
+                "scores": result.anti_spoofing_result.scores
+            }
+        
+        return EmbeddingResponse(
+            embedding=result.embedding.tolist(),
+            confidence=result.confidence,
+            is_real=result.is_real,
+            processing_time=result.processing_time,
+            anti_spoofing_details=anti_spoofing_details
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in inference endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/insert_student", response_model=MultiImageResponse)
+async def insert_student(request: MultiImageRequest):
+    """
+    Process 3 images for student insertion with voting mechanism
+    
+    - **request**: MultiImageRequest with class_code, student_id, and 3 base64 images
+    - Returns consensus embedding if faces are consistent
+    """
+    if inference_engine is None:
+        raise HTTPException(status_code=503, detail="Inference engine not initialized")
+    
+    try:
+        # Load all three images from base64
+        images = []
+        for i, base64_image in enumerate([request.image1, request.image2, request.image3], 1):
+            try:
+                image = load_image_from_base64(base64_image)
+                images.append(image)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Error loading image {i}: {str(e)}"
+                )
+        
+        # Process multiple images
+        result = inference_engine.process_multiple_images(images)
+        
+        # Prepare individual results
+        individual_results = []
+        for i, individual_result in enumerate(result.individual_results):
+            individual_data = {
+                "image_index": i + 1,
+                "success": individual_result.success,
+                "confidence": individual_result.confidence,
+                "is_real": individual_result.is_real,
+                "processing_time": individual_result.processing_time
+            }
+            
+            if individual_result.error_message:
+                individual_data["error"] = individual_result.error_message
+            
+            if individual_result.anti_spoofing_result:
+                individual_data["anti_spoofing"] = {
+                    "is_real": individual_result.anti_spoofing_result.is_real,
+                    "confidence": individual_result.anti_spoofing_result.confidence,
+                    "reason": individual_result.anti_spoofing_result.reason
+                }
+            
+            individual_results.append(individual_data)
+        
+        # Prepare voting result
+        voting_data = {}
+        if result.voting_result:
+            voting_data = {
+                "is_consistent": result.voting_result.is_consistent,
+                "confidence": result.voting_result.confidence,
+                "reason": result.voting_result.reason,
+                "individual_scores": result.voting_result.individual_scores,
+                "similarity_matrix": result.voting_result.similarity_matrix.tolist() if result.voting_result.similarity_matrix.size > 0 else []
+            }
+        
+        if result.success:
+            return MultiImageResponse(
+                consensus_embedding=result.consensus_embedding.tolist(),
+                individual_results=individual_results,
+                voting_result=voting_data,
+                total_processing_time=result.total_processing_time,
+                status="success"
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "status": "failed",
+                    "reason": result.error_message,
+                    "individual_results": individual_results,
+                    "voting_result": voting_data
+                }
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in insert_student endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/extract_embedding_fast")
+async def extract_embedding_fast(request: ImageRequest):
+    """
+    Fast embedding extraction without anti-spoofing (for performance)
+    
+    - **request**: ImageRequest with base64 encoded image
+    - Returns only the face embedding
+    """
+    if inference_engine is None:
+        raise HTTPException(status_code=503, detail="Inference engine not initialized")
+    
+    try:
+        # Load image from base64
+        image = load_image_from_base64(request.image)
+        
+        # Extract embedding only
+        embedding = inference_engine.extract_embedding_only(image)
+        
+        if embedding is None:
+            raise HTTPException(status_code=400, detail="Could not extract embedding")
+        
+        return {
+            "embedding": embedding.tolist(),
+            "status": "success"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in fast embedding endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/validate_quality")
+async def validate_face_quality(request: ImageRequest):
+    """
+    Validate face image quality for mobile constraints
+    
+    - **request**: ImageRequest with base64 encoded image
+    - Returns quality metrics and validation result
+    """
+    if inference_engine is None:
+        raise HTTPException(status_code=503, detail="Inference engine not initialized")
+    
+    try:
+        # Load image from base64
+        image = load_image_from_base64(request.image)
+        
+        # Validate quality
+        quality_result = inference_engine.validate_face_quality(image)
+        
+        return quality_result
+        
+    except Exception as e:
+        logger.error(f"Error in quality validation endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/benchmark")
+async def benchmark_performance(request: ImageRequest, iterations: int = 10):
+    """
+    Benchmark inference performance on mobile CPU
+    
+    - **request**: ImageRequest with base64 encoded image
+    - **iterations**: Number of iterations for averaging
+    - Returns performance metrics
+    """
+    if inference_engine is None:
+        raise HTTPException(status_code=503, detail="Inference engine not initialized")
+    
+    try:
+        # Load image from base64
+        image = load_image_from_base64(request.image)
+        
+        # Run benchmark
+        benchmark_result = inference_engine.benchmark_performance(image, iterations)
+        
+        return benchmark_result
+        
+    except Exception as e:
+        logger.error(f"Error in benchmark endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+# File upload endpoints (for backward compatibility)
+@app.post("/inference_file", response_model=EmbeddingResponse)
+async def extract_embedding_file(file: UploadFile = File(...)):
+    """
+    Extract face embedding from uploaded file with anti-spoofing
     
     - **file**: Image file (JPEG, PNG)
     - Returns face embedding, confidence, and anti-spoofing result
@@ -140,11 +396,11 @@ async def extract_embedding(file: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in inference endpoint: {e}")
+        logger.error(f"Error in inference file endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@app.post("/insert_student", response_model=MultiImageResponse)
-async def insert_student(
+@app.post("/insert_student_file", response_model=MultiImageResponse)
+async def insert_student_file(
     class_code: str = Form(...),
     student_id: str = Form(...),
     image1: UploadFile = File(...),
@@ -152,7 +408,7 @@ async def insert_student(
     image3: UploadFile = File(...)
 ):
     """
-    Process 3 images for student insertion with voting mechanism
+    Process 3 uploaded files for student insertion with voting mechanism
     
     - **class_code**: Class identifier
     - **student_id**: Student identifier  
@@ -234,13 +490,13 @@ async def insert_student(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in insert_student endpoint: {e}")
+        logger.error(f"Error in insert_student file endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@app.post("/extract_embedding_fast")
-async def extract_embedding_fast(file: UploadFile = File(...)):
+@app.post("/extract_embedding_fast_file")
+async def extract_embedding_fast_file(file: UploadFile = File(...)):
     """
-    Fast embedding extraction without anti-spoofing (for performance)
+    Fast embedding extraction from uploaded file without anti-spoofing (for performance)
     
     - **file**: Image file
     - Returns only the face embedding
@@ -266,13 +522,13 @@ async def extract_embedding_fast(file: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in fast embedding endpoint: {e}")
+        logger.error(f"Error in fast embedding file endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@app.post("/validate_quality")
-async def validate_face_quality(file: UploadFile = File(...)):
+@app.post("/validate_quality_file")
+async def validate_face_quality_file(file: UploadFile = File(...)):
     """
-    Validate face image quality for mobile constraints
+    Validate face image quality from uploaded file for mobile constraints
     
     - **file**: Image file
     - Returns quality metrics and validation result
@@ -290,13 +546,13 @@ async def validate_face_quality(file: UploadFile = File(...)):
         return quality_result
         
     except Exception as e:
-        logger.error(f"Error in quality validation endpoint: {e}")
+        logger.error(f"Error in quality validation file endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@app.post("/benchmark")
-async def benchmark_performance(file: UploadFile = File(...), iterations: int = 10):
+@app.post("/benchmark_file")
+async def benchmark_performance_file(file: UploadFile = File(...), iterations: int = 10):
     """
-    Benchmark inference performance on mobile CPU
+    Benchmark inference performance on mobile CPU using uploaded file
     
     - **file**: Test image file
     - **iterations**: Number of iterations for averaging
@@ -315,7 +571,7 @@ async def benchmark_performance(file: UploadFile = File(...), iterations: int = 
         return benchmark_result
         
     except Exception as e:
-        logger.error(f"Error in benchmark endpoint: {e}")
+        logger.error(f"Error in benchmark file endpoint: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.get("/health", response_model=HealthResponse)
@@ -365,14 +621,22 @@ async def root():
         "message": "Attendity AI Module API",
         "version": "1.0.0",
         "description": "Face recognition and anti-spoofing API optimized for mobile CPU",
-        "endpoints": {
+        "primary_endpoints": {
             "/inference": "Extract face embedding with anti-spoofing",
             "/insert_student": "Process 3 images for student insertion",
             "/extract_embedding_fast": "Fast embedding extraction",
             "/validate_quality": "Validate face image quality",
             "/benchmark": "Performance benchmarking",
             "/health": "Health check"
-        }
+        },
+        "file_upload_endpoints": {
+            "/inference_file": "Extract face embedding (file upload)",
+            "/insert_student_file": "Process 3 images for student insertion (file upload)",
+            "/extract_embedding_fast_file": "Fast embedding extraction (file upload)",
+            "/validate_quality_file": "Validate face image quality (file upload)",
+            "/benchmark_file": "Performance benchmarking (file upload)"
+        },
+        "note": "Primary endpoints use base64 encoded images in JSON. File upload endpoints are for backward compatibility."
     }
 
 if __name__ == "__main__":

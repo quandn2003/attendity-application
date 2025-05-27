@@ -1,3 +1,7 @@
 /plans/
 /deepface/
 /.cursor/
+*.ipynb
+/test/
+__pycache__/
+*.pyc

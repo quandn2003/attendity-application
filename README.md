@@ -60,16 +60,12 @@ cd attendity-application
 
 ### 2. Install AI Module Dependencies
 ```bash
-cd ai
-pip install -r requirements.txt
-cd ..
+pip install -r ai/requirements.txt
 ```
 
 ### 3. Install Vector-DB Module Dependencies
 ```bash
-cd vector-db
-pip install -r requirements.txt
-cd ..
+pip install -r vector-db/requirements.txt
 ```
 
 ### 4. Install Integration Test Dependencies
@@ -81,7 +77,7 @@ pip install requests numpy
 
 ### Option 1: Run Both APIs Together (Recommended)
 ```bash
-python run_apis.py
+python3 run_apis.py
 ```
 
 This will start:
@@ -92,14 +88,12 @@ This will start:
 
 **Terminal 1 - AI Module:**
 ```bash
-cd ai
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+python3 -m uvicorn ai.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 **Terminal 2 - Vector-DB Module:**
 ```bash
-cd vector-db
-python -m uvicorn api.main:app --host 0.0.0.0 --port 8001 --reload
+python3 -m uvicorn vector-db.api.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 ## 📚 API Documentation
@@ -131,7 +125,7 @@ python -m uvicorn api.main:app --host 0.0.0.0 --port 8001 --reload
 Run the comprehensive integration test to verify both modules work together:
 
 ```bash
-python integration_test.py
+python3 integration_test.py
 ```
 
 This test will:
