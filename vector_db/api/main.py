@@ -459,8 +459,8 @@ async def search_with_voting(request: SearchWithVotingRequest):
         )
 
 @app.get("/class_stats/{class_code}", response_model=Dict[str, Any])
-async def get_class_stats(class_code: str):
-    """Get statistics for a specific class."""
+async def get_class_statistics(class_code: str):
+    """Get detailed statistics for a specific class."""
     try:
         if not chroma_client.collection_exists(class_code):
             raise HTTPException(
@@ -469,13 +469,82 @@ async def get_class_stats(class_code: str):
             )
         
         student_count = chroma_client.get_collection_count(class_code)
-        attendance_stats = attendance_manager.get_class_attendance_stats(class_code)
+        
+        # Get all students using StudentManager
+        try:
+            all_students = student_manager.list_students_in_class(class_code)
+            students_data = []
+            
+            for student in all_students:
+                # Get real attendance records for this student
+                attendance_records = attendance_manager.get_student_attendance_history(
+                    student.student_id, class_code, limit=30
+                )
+                
+                # Calculate real attendance statistics
+                total_sessions = len(attendance_records) if attendance_records else 0
+                present_sessions = len([r for r in attendance_records if r.get('status') == 'present'])
+                attendance_rate = (present_sessions / total_sessions * 100) if total_sessions > 0 else 0
+                
+                # Check if student is present today
+                today = datetime.now().date()
+                is_present_today = any(
+                    r.get('status') == 'present' and 
+                    datetime.fromisoformat(r.get('timestamp', '')).date() == today
+                    for r in attendance_records
+                )
+                
+                students_data.append({
+                    "student_id": student.student_id,
+                    "name": student.name or student.student_id,
+                    "email": student.email or '',
+                    "is_present": is_present_today,
+                    "attendance_rate": round(attendance_rate, 2),
+                    "total_sessions": total_sessions,
+                    "present_sessions": present_sessions,
+                    "created_at": student.created_at or ''
+                })
+            
+        except Exception as e:
+            logger.warning(f"Could not fetch detailed student data for {class_code}: {e}")
+            # Fallback to basic data
+            students_data = []
+        
+        # Get recent attendance records for the class
+        recent_attendance = attendance_manager.get_recent_attendance(class_code, limit=10)
+        
+        # Calculate overall class attendance statistics
+        if students_data:
+            total_possible_sessions = len(students_data) * 20 if students_data else 0  # Assuming 20 sessions per semester
+            total_attended = sum(student['present_sessions'] for student in students_data)
+            overall_attendance_rate = (total_attended / total_possible_sessions * 100) if total_possible_sessions > 0 else 0
+            
+            # Count students present today
+            present_today = len([s for s in students_data if s['is_present']])
+        else:
+            # Fallback calculation using recent attendance
+            total_records = len(recent_attendance)
+            present_records = len([r for r in recent_attendance if r.get('status') == 'present'])
+            overall_attendance_rate = (present_records / total_records * 100) if total_records > 0 else 0
+            
+            # Calculate present today from recent attendance
+            today = datetime.now().date()
+            present_today = len(set([
+                r['student_id'] for r in recent_attendance 
+                if r.get('status') == 'present' and 
+                datetime.fromisoformat(r.get('timestamp', '')).date() == today
+            ]))
         
         return {
+            "status": "success",
             "class_code": class_code,
             "student_count": student_count,
-            "attendance_stats": attendance_stats,
-            "last_updated": datetime.now().isoformat()
+            "present_today": present_today,
+            "attendance_rate": round(overall_attendance_rate, 2),
+            "students": students_data,
+            "recent_attendance": recent_attendance,
+            "last_updated": datetime.now().isoformat(),
+            "class_name": f"{class_code} Course"
         }
         
     except HTTPException:
@@ -484,7 +553,7 @@ async def get_class_stats(class_code: str):
         logger.error(f"Failed to get class stats for {class_code}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get class stats: {str(e)}"
+            detail=f"Failed to retrieve class statistics: {str(e)}"
         )
 
 @app.get("/student_attendance/{class_code}/{student_id}", response_model=Dict[str, Any])
@@ -497,29 +566,122 @@ async def get_student_attendance(class_code: str, student_id: str):
                 detail=f"Class '{class_code}' not found"
             )
         
-        if not student_manager.student_exists(student_id, class_code):
+        # Check if student exists
+        student = student_manager.get_student(student_id, class_code)
+        if not student:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Student '{student_id}' not found in class '{class_code}'"
             )
         
-        attendance_history = attendance_manager.get_student_attendance_history(student_id, class_code)
+        # Get real attendance records
+        attendance_records = attendance_manager.get_student_attendance_history(
+            student_id, class_code, limit=50
+        )
+        
+        # Calculate real statistics
+        total_sessions = len(attendance_records) if attendance_records else 0
+        attended_sessions = len([r for r in attendance_records if r.get('status') == 'present'])
+        attendance_rate = (attended_sessions / total_sessions * 100) if total_sessions > 0 else 0
+        
+        # Get student metadata
+        student_metadata = student.get('metadata', {})
         
         return {
+            "status": "success",
             "student_id": student_id,
             "class_code": class_code,
-            "attendance_history": attendance_history,
-            "total_attendances": len(attendance_history),
-            "last_updated": datetime.now().isoformat()
+            "total_sessions": total_sessions,
+            "attended_sessions": attended_sessions,
+            "attendance_rate": round(attendance_rate, 2),
+            "attendance_records": attendance_records,
+            "student_info": {
+                "name": student_metadata.get('name', student_id),
+                "email": student_metadata.get('email', ''),
+                "created_at": student_metadata.get('created_at', '')
+            }
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get student attendance for {student_id}: {e}")
+        logger.error(f"Failed to get attendance for {student_id} in {class_code}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get student attendance: {str(e)}"
+            detail=f"Failed to retrieve student attendance: {str(e)}"
+        )
+
+@app.get("/classes", response_model=Dict[str, Any])
+async def get_all_classes():
+    """Get all classes with real statistics."""
+    try:
+        # Get collections using the correct method
+        collections_info = chroma_client.list_collections()
+        classes_data = []
+        
+        for collection_info in collections_info:
+            try:
+                class_code = collection_info['class_code']
+                student_count = chroma_client.get_collection_count(class_code)
+                
+                # Get real attendance data for this class
+                recent_attendance = attendance_manager.get_recent_attendance(class_code, limit=100)
+                
+                # Calculate present today
+                today = datetime.now().date()
+                present_today = len(set([
+                    r['student_id'] for r in recent_attendance 
+                    if r.get('status') == 'present' and 
+                    datetime.fromisoformat(r.get('timestamp', '')).date() == today
+                ]))
+                
+                # Calculate attendance rate
+                total_records = len(recent_attendance)
+                present_records = len([r for r in recent_attendance if r.get('status') == 'present'])
+                attendance_rate = (present_records / total_records * 100) if total_records > 0 else 0
+                
+                # Get last session date
+                last_session = None
+                if recent_attendance:
+                    last_session = max([
+                        datetime.fromisoformat(r.get('timestamp', ''))
+                        for r in recent_attendance
+                    ]).date().isoformat()
+                
+                classes_data.append({
+                    "class_code": class_code,
+                    "class_name": f"{class_code} Course",
+                    "student_count": student_count,
+                    "present_today": present_today,
+                    "attendance_rate": round(attendance_rate, 2),
+                    "last_session": last_session or collection_info.get('created_at', 'No sessions yet'),
+                    "created_at": collection_info.get('created_at', 'Unknown'),
+                    "status": "active"
+                })
+            except Exception as e:
+                logger.error(f"Error processing class {collection_info.get('class_code', 'unknown')}: {e}")
+                # Add basic info even if detailed stats fail
+                classes_data.append({
+                    "class_code": collection_info.get('class_code', 'unknown'),
+                    "class_name": f"{collection_info.get('class_code', 'unknown')} Course",
+                    "student_count": 0,
+                    "present_today": 0,
+                    "attendance_rate": 0,
+                    "status": "error",
+                    "error": str(e)
+                })
+        
+        return {
+            "status": "success",
+            "classes": classes_data,
+            "total_classes": len(classes_data)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get classes: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve classes: {str(e)}"
         )
 
 if __name__ == "__main__":

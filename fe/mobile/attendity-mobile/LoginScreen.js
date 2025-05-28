@@ -23,13 +23,17 @@ export default function LoginScreen({ navigation }) {
       return;
     }
     
-    // Mock login - just navigate to dashboard
-    Alert.alert('Success', `Welcome ${email}!`, [
-      {
-        text: 'OK',
-        onPress: () => navigation.navigate('Dashboard')
-      }
-    ]);
+    // Mock authentication
+    if (email === 'hungluu111103' && password === 'hungluu111103') {
+      Alert.alert('Success', `Welcome ${email}!`, [
+        {
+          text: 'OK',
+          onPress: () => navigation.navigate('Dashboard')
+        }
+      ]);
+    } else {
+      Alert.alert('Error', 'Invalid username or password');
+    }
   };
 
   const handleForgotPassword = () => {

@@ -13,7 +13,7 @@ class DatabaseConfig:
     max_batch_size: int = 100
     similarity_threshold: float = 0.6
     top_k_results: int = 3
-    voting_threshold: float = 0.8
+    voting_threshold: float = 0.6
     
     # Mobile optimization settings
     enable_compression: bool = True

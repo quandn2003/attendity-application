@@ -8,6 +8,7 @@ import logging
 import time
 import base64
 import httpx
+import json
 
 from ai.inference.engine import InferenceEngine
 from ai.models.facenet_model import ModelConfig
@@ -63,6 +64,16 @@ class HealthResponse(BaseModel):
     cpu_optimized: bool
     components_status: Dict[str, bool]
     system_info: Dict[str, Any]
+
+class DeleteStudentRequest(BaseModel):
+    """Request model for deleting a student"""
+    class_code: str = Field(..., min_length=1, max_length=50, description="Class identifier")
+    student_id: str = Field(..., min_length=1, max_length=50, description="Student identifier")
+
+class DeleteStudentResponse(BaseModel):
+    success: bool
+    message: str
+    deleted_count: int = 0
 
 @app.on_event("startup")
 async def startup_event():
@@ -402,6 +413,62 @@ async def health_check():
             system_info={"error": str(e)}
         )
 
+@app.delete("/delete_student", response_model=DeleteStudentResponse)
+async def delete_student(request: DeleteStudentRequest):
+    """
+    Delete a student from the vector database
+    
+    - **request**: DeleteStudentRequest with class_code and student_id
+    - Returns deletion result
+    """
+    try:
+        # Forward delete request to vector database
+        async with httpx.AsyncClient() as client:
+            # The vector DB expects a "students" array format
+            vector_db_payload = {
+                "students": [{
+                    "class_code": request.class_code,
+                    "student_id": request.student_id
+                }]
+            }
+            
+            response = await client.request(
+                "DELETE",
+                "http://localhost:8001/delete_student",
+                headers={"Content-Type": "application/json"},
+                content=json.dumps(vector_db_payload),
+                timeout=30.0
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Failed to delete student from vector DB: {response.text}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to delete student from database: {response.text}"
+                )
+            
+            db_response = response.json()
+            logger.info(f"Successfully deleted student {request.student_id} from vector DB")
+            
+            return DeleteStudentResponse(
+                success=True,
+                message=f"Student {request.student_id} deleted successfully",
+                deleted_count=db_response.get("deleted_count", 0)
+            )
+            
+    except httpx.RequestError as e:
+        logger.error(f"Network error when deleting student: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Vector database service unavailable"
+        )
+    except Exception as e:
+        logger.error(f"Error deleting student: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete student: {str(e)}"
+        )
+
 @app.get("/")
 async def root():
     """Root endpoint with API information"""
@@ -415,7 +482,8 @@ async def root():
             "/extract_embedding_fast": "Fast embedding extraction",
             "/validate_quality": "Validate face image quality",
             "/benchmark": "Performance benchmarking",
-            "/health": "Health check"
+            "/health": "Health check",
+            "/delete_student": "Delete a student"
         },
         "input_format": "All endpoints accept base64 encoded images in JSON payload",
         "note": "This API only accepts base64 encoded images. File uploads are not supported."
