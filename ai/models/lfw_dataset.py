@@ -177,7 +177,7 @@ class LFWIdentityDataset(Dataset):
     
     def _build_dataset(self) -> Tuple[Dict[str, int], List[Tuple]]:
         """Build dataset from directory structure"""
-        lfw_dir = os.path.join(self.data_dir, "lfw-funneled", "lfw_funneled")
+        lfw_dir = os.path.join(self.data_dir, "lfw-funneled")
         identity_to_idx = {}
         samples = []
         
