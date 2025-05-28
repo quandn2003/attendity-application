@@ -368,12 +368,12 @@ class LFWTripletTrainer:
                     self.save_checkpoint(epoch, is_best=True)
                     print(f"New best validation accuracy: {val_acc:.4f}")
             
-            # Test evaluation (every 10 epochs)
-            if (epoch + 1) % 10 == 0 and os.path.exists(test_pairs):
+            # Test evaluation (configurable frequency)
+            if (epoch + 1) % self.config.get('test_every', 10) == 0 and os.path.exists(test_pairs):
                 test_acc = self.evaluate_pairs(test_pairs, "Test")
                 print(f"*********** Test Acc: {test_acc:.4f}")
             
-            # Regular checkpoint saving
+            # Regular checkpoint saving (configurable frequency)
             if (epoch + 1) % self.config.get('save_every', 10) == 0:
                 self.save_checkpoint(epoch, is_best=False)
         
@@ -444,6 +444,8 @@ def main():
     parser.add_argument('--pretrained', type=str, default=None, choices=[None, 'vggface2', 'casia-webface'])
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoints_triplet', help='Checkpoint directory')
     parser.add_argument('--num_workers', type=int, default=4, help='Number of data loader workers')
+    parser.add_argument('--test_every', type=int, default=10, help='Number of epochs between test evaluations')
+    parser.add_argument('--save_every', type=int, default=10, help='Number of epochs between regular checkpoint saves')
     
     args = parser.parse_args()
     
@@ -464,7 +466,8 @@ def main():
         'lr_step_size': 15,
         'lr_gamma': 0.1,
         'dropout_prob': 0.6,
-        'save_every': 10
+        'test_every': args.test_every,
+        'save_every': args.save_every
     }
     
     os.makedirs(config['checkpoint_dir'], exist_ok=True)
