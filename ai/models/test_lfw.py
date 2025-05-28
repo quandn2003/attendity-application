@@ -28,19 +28,46 @@ logger = logging.getLogger(__name__)
 class LFWEvaluator:
     """Evaluator for InceptionResNetV1 on LFW dataset"""
     
-    def __init__(self, model_path: str, config_path: str = None):
+    def __init__(self, model_path: str = None, config_path: str = None, pretrained: str = None):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         logger.info(f"Using device: {self.device}")
         
         self.model = None
         self.config = None
         
-        self._load_model_and_config(model_path, config_path)
+        if pretrained:
+            self._load_model_and_config(None, config_path, pretrained)
+        elif model_path:
+            self._load_model_and_config(model_path, config_path)
+        else:
+            raise ValueError("Either model_path or pretrained must be specified")
     
-    def _load_model_and_config(self, model_path: str, config_path: str = None):
+    def _load_model_and_config(self, model_path: str, config_path: str = None, pretrained: str = None):
         """Load trained model and configuration"""
+        
+        # If using pretrained model, skip checkpoint loading
+        if pretrained:
+            self.config = {
+                'embedding_dim': 512,
+                'dropout_prob': 0.6,
+                'pretrained': pretrained
+            }
+            
+            self.model = InceptionResnetV1(
+                pretrained=pretrained,
+                classify=False,
+                dropout_prob=self.config.get('dropout_prob', 0.6),
+                device=self.device
+            )
+            
+            self.model = self.model.to(self.device)
+            self.model.eval()
+            
+            logger.info(f"Loaded pretrained model: {pretrained}")
+            return
+        
+        # Original checkpoint loading logic
         try:
-            # Try loading with weights_only=False for trusted checkpoints
             checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
         except Exception as e:
             logger.error(f"Failed to load checkpoint: {e}")
@@ -365,8 +392,10 @@ class LFWEvaluator:
 
 def main():
     parser = argparse.ArgumentParser(description='Test InceptionResNetV1 on LFW dataset')
-    parser.add_argument('--model_path', type=str, required=True, help='Path to trained model checkpoint')
+    parser.add_argument('--model_path', type=str, default=None, help='Path to trained model checkpoint')
     parser.add_argument('--config_path', type=str, default=None, help='Path to config file')
+    parser.add_argument('--pretrained', type=str, default=None, choices=['vggface2', 'casia-webface'], 
+                       help='Use pretrained model (vggface2 or casia-webface)')
     parser.add_argument('--data_dir', type=str, default='data', help='Path to LFW data directory')
     parser.add_argument('--test_file', type=str, default='pairs.txt', help='Test pairs file')
     parser.add_argument('--output_dir', type=str, default='test_results', help='Output directory for results')
@@ -375,9 +404,16 @@ def main():
     
     args = parser.parse_args()
     
+    # Validate arguments
+    if not args.pretrained and not args.model_path:
+        parser.error("Either --model_path or --pretrained must be specified")
+    
+    if args.pretrained and args.model_path:
+        parser.error("Cannot specify both --model_path and --pretrained")
+    
     os.makedirs(args.output_dir, exist_ok=True)
     
-    evaluator = LFWEvaluator(args.model_path, args.config_path)
+    evaluator = LFWEvaluator(args.model_path, args.config_path, args.pretrained)
     
     if args.protocol == '10fold':
         logger.info("Running 10-fold cross-validation evaluation")
