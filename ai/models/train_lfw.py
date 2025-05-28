@@ -217,7 +217,7 @@ class LFWTripletTrainer:
         
         self.model.eval()
         with torch.no_grad():
-            for batch in tqdm(dataloader, desc=f"Evaluating {dataset_name}", leave=False):
+            for batch in tqdm(dataloader, desc=f"Evaluating", leave=False):
                 img1 = batch['img1'].to(self.device)
                 img2 = batch['img2'].to(self.device)
                 batch_labels = batch['label'].cpu().numpy()
@@ -254,8 +254,8 @@ class LFWTripletTrainer:
         epoch_loss = 0.0
         num_batches = 0
         
-        # Add progress bar for batches in epoch
-        pbar = tqdm(range(self.config['epoch_size']), desc="Training batches", leave=False)
+        # Simple progress bar for batches in epoch
+        pbar = tqdm(range(self.config['epoch_size']), desc="Processing batches", leave=False)
         
         for batch_idx in pbar:
             # Sample people and images
@@ -285,7 +285,6 @@ class LFWTripletTrainer:
             triplets = select_triplets(embeddings, num_per_class, self.config.get('alpha', 0.2))
             
             if len(triplets) == 0:
-                pbar.set_postfix({'triplets': 0, 'loss': 'N/A'})
                 continue
             
             # Train on selected triplets
@@ -328,13 +327,6 @@ class LFWTripletTrainer:
                 current_loss = np.mean(batch_losses)
                 epoch_loss += current_loss
                 num_batches += 1
-                
-                # Update progress bar with current stats
-                pbar.set_postfix({
-                    'triplets': len(triplets),
-                    'loss': f'{current_loss:.4f}',
-                    'avg_loss': f'{epoch_loss/num_batches:.4f}'
-                })
         
         pbar.close()
         return epoch_loss / num_batches if num_batches > 0 else 0.0
@@ -348,11 +340,8 @@ class LFWTripletTrainer:
         val_pairs = os.path.join(self.config['data_dir'], 'pairsDevTest.txt')
         test_pairs = os.path.join(self.config['data_dir'], 'pairs.txt')
         
-        # Main progress bar for epochs
-        epoch_pbar = tqdm(range(self.config['num_epochs']), desc="Training Progress")
-        
-        for epoch in epoch_pbar:
-            epoch_pbar.set_description(f"Epoch {epoch + 1}/{self.config['num_epochs']}")
+        for epoch in range(self.config['num_epochs']):
+            print(f"\nEpoch {epoch + 1}/{self.config['num_epochs']}")
             
             # Training
             train_loss = self.train_epoch(dataset)
@@ -363,35 +352,31 @@ class LFWTripletTrainer:
             if os.path.exists(train_pairs):
                 train_acc = self.evaluate_pairs(train_pairs, "Train")
                 self.train_accuracies.append(train_acc)
-                epoch_info = f"Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}"
+                print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
             else:
-                epoch_info = f"Loss: {train_loss:.4f}"
+                print(f"Train Loss: {train_loss:.4f}")
             
             # Validation evaluation
             if os.path.exists(val_pairs):
                 val_acc = self.evaluate_pairs(val_pairs, "Validation")
                 self.val_accuracies.append(val_acc)
-                epoch_info += f", Val Acc: {val_acc:.4f}"
+                print(f"Validation Acc: {val_acc:.4f}")
                 
                 # Save best model based on validation accuracy
                 if val_acc > self.best_val_accuracy:
                     self.best_val_accuracy = val_acc
                     self.save_checkpoint(epoch, is_best=True)
-                    epoch_info += " (NEW BEST!)"
+                    print(f"New best validation accuracy: {val_acc:.4f}")
             
             # Test evaluation (every 10 epochs)
             if (epoch + 1) % 10 == 0 and os.path.exists(test_pairs):
                 test_acc = self.evaluate_pairs(test_pairs, "Test")
-                epoch_info += f", *** Test Acc: {test_acc:.4f} ***"
-            
-            # Update progress bar with current epoch info
-            epoch_pbar.set_postfix_str(epoch_info)
+                print(f"*********** Test Acc: {test_acc:.4f}")
             
             # Regular checkpoint saving
             if (epoch + 1) % self.config.get('save_every', 10) == 0:
                 self.save_checkpoint(epoch, is_best=False)
         
-        epoch_pbar.close()
         print(f"\nTraining completed. Best validation accuracy: {self.best_val_accuracy:.4f}")
     
     def save_checkpoint(self, epoch: int, is_best: bool = False):
