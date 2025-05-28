@@ -1,8 +1,14 @@
 /plans/
 /deepface/
 /facenet-pytorch/
+/facenet/
 /.cursor/
 *.ipynb
-# /test/
+/test/
 __pycache__/
+/checkpoints_triplet/
+/checkpoints_triplet_test/
+/run_apis.py/
+/data/
+/results/
 *.pyc

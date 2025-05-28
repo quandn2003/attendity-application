@@ -4,9 +4,13 @@ uvicorn==0.34.2
 requests==2.32.3
 httpx==0.28.1
 python-multipart==0.0.20
+chromadb==1.0.11
 numpy==2.2.6
 torch==2.7.0
 torchvision==0.22.0
 opencv-python==4.11.0.86
 tqdm==4.67.1
-chromadb==1.0.10
+matplotlib==3.10.3
+scikit-learn==1.6.1
+seaborn==0.13.2
+Pillow==11.2.1

@@ -1,299 +1,255 @@
-# Attendity - Mobile Attendance System
+# Attendity - Mobile Face Recognition Attendance System
 
-A comprehensive mobile attendance system using AI face recognition and vector database technology, optimized for mobile CPU deployment.
+A mobile-optimized attendance system using face recognition technology with anti-spoofing capabilities, built with Python, PyTorch, and ChromaDB.
 
-## 🏗️ Project Architecture
+## 🏗️ Architecture
 
 ```
 attendity-application/
-├── ai/                          # AI Module - Face Recognition & Anti-Spoofing
+├── ai/                          # AI Module
 │   ├── models/                  # FaceNet model implementation
-│   ├── utils/                   # Preprocessing, anti-spoofing, voting
 │   ├── inference/               # Inference engine
-│   ├── api/                     # FastAPI endpoints
-│   └── requirements.txt         # AI module dependencies
-├── vector-db/                   # Vector Database Module
-│   ├── database/                # ChromaDB client and managers
-│   ├── voting/                  # Similarity voting system
-│   ├── config/                  # Database configuration
-│   ├── api/                     # FastAPI endpoints
-│   └── requirements.txt         # Vector-DB dependencies
-├── run_apis.py                  # Startup script for both APIs
-├── integration_test.py          # Integration testing script
-└── README.md                    # This file
+│   ├── utils/                   # Preprocessing & anti-spoofing
+│   └── api/                     # FastAPI AI service
+└── vector_db/                   # Vector Database Module
+    ├── database/                # ChromaDB client & managers
+    ├── voting/                  # Similarity voting system
+    ├── config/                  # Database configuration
+    └── api/                     # FastAPI database service
 ```
 
-## 🚀 Key Features
+## 🚀 Features
 
 ### AI Module
-- **Mobile CPU Optimization**: Quantized models, CPU threading, memory management
-- **3-Image Voting System**: Consensus building from multiple face images for student insertion
-- **Anti-Spoofing Detection**: Texture analysis, color distribution, quality metrics
-- **FaceNet Implementation**: 512-dimensional embeddings with Inception ResNet v1
-- **Quality Validation**: Face detection confidence, image quality checks
+- **Face Recognition**: FaceNet (Inception-ResNet-V1) with 512-dimensional embeddings
+- **Anti-Spoofing**: Multiple detection methods for presentation attack detection
+- **Mobile Optimization**: CPU-optimized inference with model quantization
+- **Multi-Image Processing**: Student registration with 3-image consensus
 
 ### Vector Database Module
-- **ChromaDB Integration**: Persistent vector storage optimized for mobile
-- **Top-3 Voting System**: Advanced similarity voting for attendance verification
-- **Student Management**: Batch operations, consensus embeddings
-- **Attendance Tracking**: Real-time attendance recording with confidence scores
-- **Mobile Optimization**: Compression, cleanup, memory management
+- **ChromaDB Integration**: Persistent vector storage with similarity search
+- **Voting System**: Top-3 candidate voting for attendance verification
+- **Class Management**: Separate collections per class with batch operations
+- **Attendance Tracking**: Real-time verification with history logging
 
 ## 📋 Requirements
 
-### System Requirements
 - Python 3.8+
-- CPU: Multi-core processor (4+ cores recommended)
-- RAM: 4GB+ (8GB recommended)
-- Storage: 2GB+ free space
+- Git
 
-### Dependencies
-All dependencies are managed through requirements.txt files in each module.
-
-## 🛠️ Installation & Setup
+## 🛠️ Installation
 
 ### 1. Clone the Repository
 ```bash
-git clone <repository-url>
+git clone https://github.com/quandn2003/attendity-application.git
 cd attendity-application
 ```
 
-### 2. Install AI Module Dependencies
+### 2. Install Dependencies
 ```bash
-pip install -r ai/requirements.txt
+pip install -r requirements.txt
 ```
 
-### 3. Install Vector-DB Module Dependencies
+## 🏃‍♂️ Quick Start
+
+### 1. Start AI Service
 ```bash
-pip install -r vector-db/requirements.txt
+uvicorn ai.api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### 4. Install Integration Test Dependencies
+### 2. Start Vector Database Service
 ```bash
-pip install requests numpy
+uvicorn vector_db.api.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-## 🚀 Running the System
-
-### Option 1: Run Both APIs Together (Recommended)
+### 3. Health Check
 ```bash
-python3 run_apis.py
-```
-
-This will start:
-- AI Module API on `http://localhost:8000`
-- Vector-DB API on `http://localhost:8001`
-
-### Option 2: Run APIs Separately
-
-**Terminal 1 - AI Module:**
-```bash
-python3 -m uvicorn ai.api.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-**Terminal 2 - Vector-DB Module:**
-```bash
-python3 -m uvicorn vector-db.api.main:app --host 0.0.0.0 --port 8001 --reload
+curl http://localhost:8000/health
+curl http://localhost:8001/health
 ```
 
 ## 📚 API Documentation
 
-### AI Module API (`http://localhost:8000`)
-- **Swagger UI**: `http://localhost:8000/docs`
-- **ReDoc**: `http://localhost:8000/redoc`
+### AI Module Endpoints (Port 8000)
 
-#### Key Endpoints:
-- `POST /inference` - Extract face embedding with anti-spoofing
-- `POST /insert_student` - Process 3 images for student insertion
-- `POST /extract_embedding_fast` - Fast embedding extraction
-- `GET /health` - Health check
-
-### Vector-DB API (`http://localhost:8001`)
-- **Swagger UI**: `http://localhost:8001/docs`
-- **ReDoc**: `http://localhost:8001/redoc`
-
-#### Key Endpoints:
-- `POST /create_class` - Create new class collection
-- `POST /insert_student` - Insert students with consensus embeddings
-- `POST /search_with_voting` - Attendance verification with voting
-- `GET /class_stats/{class_code}` - Class statistics
-- `GET /health` - Health check
-
-## 🧪 Testing
-
-### Integration Test
-Run the comprehensive integration test to verify both modules work together:
-
+#### Extract Face Embedding
 ```bash
-python3 integration_test.py
+POST /inference
+{
+  "image": "base64_encoded_image"
+}
 ```
 
-This test will:
-1. Check API health
-2. Create a test class
-3. Insert test students with mock embeddings
-4. Test attendance verification
-5. Verify voting system functionality
-6. Display statistics
-
-### Manual Testing
-
-#### 1. Create a Class
+#### Student Registration (3 Images)
 ```bash
-curl -X POST "http://localhost:8001/create_class" \
-     -H "Content-Type: application/json" \
-     -d '{"class_code": "CS101"}'
+POST /insert_student
+{
+  "class_code": "CS101",
+  "student_id": "12345",
+  "image1": "base64_image_1",
+  "image2": "base64_image_2", 
+  "image3": "base64_image_3"
+}
 ```
 
-#### 2. Insert Students (with mock embeddings)
+### Vector Database Endpoints (Port 8001)
+
+#### Create Class
 ```bash
-curl -X POST "http://localhost:8001/insert_student" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "students": [
-         {
-           "student_id": "student001",
-           "class_code": "CS101",
-           "embedding": [0.1, 0.2, ..., 0.512]
-         }
-       ]
-     }'
+POST /create_class
+{
+  "class_code": "CS101"
+}
 ```
 
-#### 3. Verify Attendance
+#### Register Student
 ```bash
-curl -X POST "http://localhost:8001/search_with_voting" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "embedding": [0.1, 0.2, ..., 0.512],
-       "class_code": "CS101",
-       "threshold": 0.7
-     }'
+POST /insert_student
+{
+  "students": [{
+    "student_id": "12345",
+    "class_code": "CS101",
+    "embedding": [0.1, 0.2, ...]
+  }]
+}
+```
+
+#### Verify Attendance
+```bash
+POST /search_with_voting
+{
+  "embedding": [0.1, 0.2, ...],
+  "class_code": "CS101",
+  "threshold": 0.7
+}
 ```
 
 ## 🔧 Configuration
 
 ### AI Module Configuration
-Located in `ai/models/facenet_model.py`:
 ```python
-@dataclass
-class ModelConfig:
-    embedding_dim: int = 512
-    input_size: Tuple[int, int] = (160, 160)
-    cpu_threads: int = 4
-    quantization: bool = True
+ModelConfig(
+    embedding_dim=512,
+    input_size=(160, 160),
+    pretrained='vggface2',
+    cpu_threads=4,
+    quantization=True,
+    device='cpu'
+)
 ```
 
-### Vector-DB Configuration
-Located in `vector-db/config/database_config.py`:
+### Vector Database Configuration
 ```python
-@dataclass
-class DatabaseConfig:
-    similarity_threshold: float = 0.6
-    voting_threshold: float = 0.8
-    top_k_results: int = 3
-    max_batch_size: int = 100
+DatabaseConfig(
+    persist_directory="./chroma_db",
+    embedding_dimension=512,
+    similarity_threshold=0.6,
+    voting_threshold=0.8,
+    max_batch_size=100
+)
 ```
 
-## 📱 Mobile Deployment Considerations
+## 🔄 Key Workflows
 
-### CPU Optimization
-- Model quantization (INT8/FP16)
-- CPU threading optimization
-- Memory management
-- Efficient batch processing
-
-### Storage Optimization
-- Database compression
-- Automatic cleanup
-- Backup management
-- Size limits
-
-### Performance Monitoring
-- Processing time tracking
-- Memory usage monitoring
-- CPU utilization
-- Battery impact assessment
-
-## 🔄 Workflow
-
-### Student Registration (3-Image Voting)
-1. **Capture 3 Images**: Take 3 face photos of the student
-2. **AI Processing**: Extract embeddings from each image
-3. **Voting System**: Verify consistency between the 3 images
-4. **Consensus Building**: Generate consensus embedding if consistent
-5. **Database Storage**: Store student with consensus embedding
+### Student Registration
+1. Capture 3 face images
+2. AI Module processes images → extracts embeddings
+3. Vector DB stores embeddings with metadata
+4. Return success/failure status
 
 ### Attendance Verification
-1. **Capture Image**: Take attendance photo
-2. **AI Processing**: Extract face embedding with anti-spoofing
-3. **Database Search**: Find top-3 similar students in class
-4. **Voting Decision**: Apply voting logic for final decision
-5. **Record Attendance**: Log attendance if match found
+1. Capture single face image
+2. AI Module extracts embedding + anti-spoofing check
+3. Vector DB searches similar embeddings
+4. Voting system applies top-3 voting logic
+5. Return attendance decision
 
 ## 🛡️ Security Features
 
-- **Anti-Spoofing Detection**: Prevents photo/video attacks
-- **Quality Validation**: Ensures good face image quality
-- **Confidence Thresholds**: Configurable security levels
-- **Voting System**: Reduces false positives
-- **Audit Trail**: Complete attendance logging
+### Anti-Spoofing Protection
+- Multiple detection algorithms
+- Liveness detection
+- Quality assessment
+- Confidence thresholding
 
-## 📊 Performance Metrics
+### Data Protection
+- Local data storage (no cloud dependencies)
+- Encrypted embeddings support
+- Access control via API authentication
 
-### AI Module
-- Face detection: ~50-100ms (CPU)
-- Embedding extraction: ~100-200ms (CPU)
-- Anti-spoofing: ~20-50ms (CPU)
-- Total processing: ~200-400ms per image
+## ⚡ Performance Optimizations
 
-### Vector-DB Module
-- Similarity search: ~10-50ms
-- Voting decision: ~5-20ms
-- Database operations: ~5-30ms
+### Mobile CPU Optimizations
+- Model quantization for faster inference
+- Optimized batch sizes for memory constraints
+- Configurable CPU thread usage
+- Efficient memory management
 
-## 🐛 Troubleshooting
+### Database Optimizations
+- Collection partitioning per class
+- Batch insert/delete operations
+- Optimized vector search algorithms
+- Automated data cleanup
 
-### Common Issues
+## 🔍 Monitoring
 
-1. **APIs not starting**
-   - Check port availability (8000, 8001)
-   - Verify dependencies installation
-   - Check Python version (3.8+)
+### Health Checks
+- Model loading status
+- Database connectivity
+- Memory usage monitoring
+- Performance metrics
 
-2. **Memory issues**
-   - Reduce batch sizes in configuration
-   - Enable model quantization
-   - Monitor memory usage
+### Logging
+```python
+import logging
+logging.basicConfig(level=logging.INFO)
+```
 
-3. **Slow performance**
-   - Increase CPU threads
-   - Enable quantization
-   - Optimize database settings
+## 🧪 Testing
 
-### Logs
-- AI Module logs: Check console output
-- Vector-DB logs: Check console output
-- Integration test logs: Detailed test results
+### Test Face Recognition
+```bash
+curl -X POST "http://localhost:8000/inference" \
+  -H "Content-Type: application/json" \
+  -d '{"image": "base64_encoded_test_image"}'
+```
+
+### Benchmark Performance
+```bash
+curl -X POST "http://localhost:8000/benchmark" \
+  -H "Content-Type: application/json" \
+  -d '{"image": "base64_encoded_image", "iterations": 10}'
+```
+
+
+## 🔮 Future Enhancements
+
+- Model fine-tuning capabilities
+- Advanced anti-spoofing methods
+- Real-time performance monitoring
+- Automated threshold tuning
+- Multi-modal biometric fusion
+- Distributed database support
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create feature branch
-3. Make changes with tests
-4. Submit pull request
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
 
-## 📄 License
+## 📞 Support
 
-This project is licensed under the MIT License.
-
-## 🙏 Acknowledgments
-
-- FaceNet paper and implementation
-- ChromaDB for vector database
-- FastAPI for API framework
-- PyTorch for deep learning
+For technical support or questions:
+- Create an issue in the repository
+- Check the troubleshooting section
+- Review API documentation at `/docs` endpoints
 
 ---
 
-**Note**: This system is optimized for mobile CPU deployment. For production use, consider additional security measures, scalability requirements, and compliance with privacy regulations. 
+**Attendity Team** - Mobile Face Recognition Attendance System 
