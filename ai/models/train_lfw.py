@@ -207,7 +207,7 @@ class LFWTripletTrainer:
             dataset,
             batch_size=32,
             shuffle=False,
-            num_workers=2,
+            num_workers=0,
             pin_memory=True
         )
         

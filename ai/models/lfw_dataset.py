@@ -55,46 +55,66 @@ class LFWPairDataset(Dataset):
     def _load_pairs(self) -> List[Tuple]:
         """Load pairs from pairs file"""
         pairs = []
+        pairs_path = os.path.join(self.data_dir, self.pairs_file)
         
-        with open(self.pairs_file, 'r') as f:
-            lines = f.readlines()
+        if not os.path.exists(pairs_path):
+            print(f"Warning: Pairs file not found: {pairs_path}")
+            return pairs
         
-        if len(lines[0].strip().split()) == 2:
-            num_folds, pairs_per_fold = map(int, lines[0].strip().split())
-            start_idx = 1
-        else:
-            start_idx = 1
+        try:
+            with open(pairs_path, 'r') as f:
+                lines = f.readlines()
             
-        for line in lines[start_idx:]:
-            parts = line.strip().split()
-            if len(parts) == 3:
-                name, img1_idx, img2_idx = parts
-                pairs.append((name, int(img1_idx), name, int(img2_idx), 1))
-            elif len(parts) == 4:
-                name1, img1_idx, name2, img2_idx = parts
-                pairs.append((name1, int(img1_idx), name2, int(img2_idx), 0))
+            # Skip header line if present
+            start_idx = 1 if lines and not lines[0].strip().split()[0].isdigit() else 0
+            
+            for line_num, line in enumerate(lines[start_idx:], start_idx + 1):
+                line = line.strip()
+                if not line:
+                    continue
+                
+                parts = line.split()
+                
+                if len(parts) == 3:
+                    # Same person pair: name img1_idx img2_idx
+                    name = parts[0]
+                    img1_idx = int(parts[1])
+                    img2_idx = int(parts[2])
+                    pairs.append((name, img1_idx, name, img2_idx, 1))
+                    
+                elif len(parts) == 4:
+                    # Different person pair: name1 img1_idx name2 img2_idx
+                    name1 = parts[0]
+                    img1_idx = int(parts[1])
+                    name2 = parts[2]
+                    img2_idx = int(parts[3])
+                    pairs.append((name1, img1_idx, name2, img2_idx, 0))
+                else:
+                    print(f"Warning: Invalid line format at line {line_num}: {line}")
+                    continue
         
+        except Exception as e:
+            print(f"Error loading pairs file {pairs_path}: {e}")
+            return []
+        
+        print(f"Loaded {len(pairs)} pairs from {pairs_path}")
         return pairs
     
     def _load_and_preprocess_image(self, person_name: str, img_idx: int) -> Optional[np.ndarray]:
-        """Load and preprocess a single image"""
-        img_name = f"{person_name}_{img_idx:04d}.jpg"
-        img_path = os.path.join(self.data_dir, "lfw-funneled", "lfw_funneled", person_name, img_name)
-        
-        if not os.path.exists(img_path):
-            logger.warning(f"Image not found: {img_path}")
-            return None
+        """Load and preprocess image for a person"""
+        img_path = os.path.join(self.data_dir, "lfw_funneled", person_name, f"{person_name}_{img_idx:04d}.jpg")
         
         try:
+            if not os.path.exists(img_path):
+                return None
+                
             img = cv2.imread(img_path)
             if img is None:
-                logger.warning(f"Failed to load image: {img_path}")
                 return None
             
             faces = self.face_detector.detect_faces(img)
             
             if not faces:
-                logger.warning(f"No face detected in: {img_path}")
                 img_resized = resize_image(img, self.target_size)
             else:
                 largest_face = max(faces, key=lambda f: f.w * f.h)
@@ -107,7 +127,6 @@ class LFWPairDataset(Dataset):
             return img_normalized.squeeze(0)
             
         except Exception as e:
-            logger.error(f"Error processing image {img_path}: {e}")
             return None
     
     def __len__(self) -> int:
@@ -115,27 +134,43 @@ class LFWPairDataset(Dataset):
     
     def __getitem__(self, idx: int) -> Dict:
         """Get a pair of images and label"""
-        name1, img1_idx, name2, img2_idx, label = self.pairs[idx]
+        max_retries = 10
+        attempts = 0
         
-        img1 = self._load_and_preprocess_image(name1, img1_idx)
-        img2 = self._load_and_preprocess_image(name2, img2_idx)
+        while attempts < max_retries:
+            current_idx = (idx + attempts) % len(self.pairs)
+            name1, img1_idx, name2, img2_idx, label = self.pairs[current_idx]
+            
+            img1 = self._load_and_preprocess_image(name1, img1_idx)
+            img2 = self._load_and_preprocess_image(name2, img2_idx)
+            
+            if img1 is not None and img2 is not None:
+                if self.transform:
+                    img1 = self.transform(img1)
+                    img2 = self.transform(img2)
+                else:
+                    img1 = torch.from_numpy(img1).permute(2, 0, 1).float()
+                    img2 = torch.from_numpy(img2).permute(2, 0, 1).float()
+                
+                return {
+                    'img1': img1,
+                    'img2': img2,
+                    'label': torch.tensor(label, dtype=torch.float32),
+                    'names': (name1, name2),
+                    'indices': (img1_idx, img2_idx)
+                }
+            
+            attempts += 1
         
-        if img1 is None or img2 is None:
-            return self.__getitem__((idx + 1) % len(self.pairs))
-        
-        if self.transform:
-            img1 = self.transform(img1)
-            img2 = self.transform(img2)
-        else:
-            img1 = torch.from_numpy(img1).permute(2, 0, 1).float()
-            img2 = torch.from_numpy(img2).permute(2, 0, 1).float()
-        
+        # If all retries failed, return a dummy sample with zeros
+        print(f"Warning: Failed to load valid pair after {max_retries} attempts, returning dummy sample")
+        dummy_img = torch.zeros(3, self.target_size[0], self.target_size[1])
         return {
-            'img1': img1,
-            'img2': img2,
-            'label': torch.tensor(label, dtype=torch.float32),
-            'names': (name1, name2),
-            'indices': (img1_idx, img2_idx)
+            'img1': dummy_img,
+            'img2': dummy_img,
+            'label': torch.tensor(0.0, dtype=torch.float32),
+            'names': ("dummy", "dummy"),
+            'indices': (0, 0)
         }
 
 class LFWIdentityDataset(Dataset):
@@ -227,7 +262,6 @@ class LFWIdentityDataset(Dataset):
             return img_normalized.squeeze(0)
             
         except Exception as e:
-            logger.error(f"Error processing image {img_path}: {e}")
             return None
     
     def __len__(self) -> int:
@@ -235,23 +269,38 @@ class LFWIdentityDataset(Dataset):
     
     def __getitem__(self, idx: int) -> Dict:
         """Get an image and its identity label"""
-        img_path, label, person_name = self.samples[idx]
+        max_retries = 10
+        attempts = 0
         
-        img = self._load_and_preprocess_image(img_path)
+        while attempts < max_retries:
+            current_idx = (idx + attempts) % len(self.samples)
+            img_path, label, person_name = self.samples[current_idx]
+            
+            img = self._load_and_preprocess_image(img_path)
+            
+            if img is not None:
+                if self.transform:
+                    img = self.transform(img)
+                else:
+                    img = torch.from_numpy(img).permute(2, 0, 1).float()
+                
+                return {
+                    'image': img,
+                    'label': torch.tensor(label, dtype=torch.long),
+                    'person_name': person_name,
+                    'img_path': img_path
+                }
+            
+            attempts += 1
         
-        if img is None:
-            return self.__getitem__((idx + 1) % len(self.samples))
-        
-        if self.transform:
-            img = self.transform(img)
-        else:
-            img = torch.from_numpy(img).permute(2, 0, 1).float()
-        
+        # If all retries failed, return a dummy sample with zeros
+        print(f"Warning: Failed to load valid image after {max_retries} attempts, returning dummy sample")
+        dummy_img = torch.zeros(3, self.target_size[0], self.target_size[1])
         return {
-            'image': img,
-            'label': torch.tensor(label, dtype=torch.long),
-            'person_name': person_name,
-            'img_path': img_path
+            'image': dummy_img,
+            'label': torch.tensor(0, dtype=torch.long),
+            'person_name': "dummy",
+            'img_path': "dummy_path"
         }
 
 def create_lfw_dataloaders(data_dir: str,
