@@ -1,0 +1,19 @@
+{
+  "data_dir": "data",
+  "batch_size": 90,
+  "num_epochs": 1,
+  "learning_rate": 0.1,
+  "embedding_dim": 512,
+  "alpha": 0.2,
+  "people_per_batch": 45,
+  "images_per_person": 40,
+  "epoch_size": 1000,
+  "pretrained": null,
+  "checkpoint_dir": "checkpoints_triplet",
+  "num_workers": 4,
+  "weight_decay": 0.0001,
+  "lr_step_size": 15,
+  "lr_gamma": 0.1,
+  "dropout_prob": 0.6,
+  "save_every": 10
+}
