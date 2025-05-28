@@ -39,7 +39,12 @@ class LFWEvaluator:
     
     def _load_model_and_config(self, model_path: str, config_path: str = None):
         """Load trained model and configuration"""
-        checkpoint = torch.load(model_path, map_location=self.device)
+        try:
+            # Try loading with weights_only=False for trusted checkpoints
+            checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
+        except Exception as e:
+            logger.error(f"Failed to load checkpoint: {e}")
+            raise
         
         if 'config' in checkpoint:
             self.config = checkpoint['config']
@@ -65,7 +70,9 @@ class LFWEvaluator:
         self.model.eval()
         
         logger.info(f"Model loaded from {model_path}")
-        if 'best_accuracy' in checkpoint:
+        if 'best_val_accuracy' in checkpoint:
+            logger.info(f"Model best validation accuracy: {checkpoint['best_val_accuracy']:.4f}")
+        elif 'best_accuracy' in checkpoint:
             logger.info(f"Model best training accuracy: {checkpoint['best_accuracy']:.4f}")
     
     def extract_embeddings(self, dataloader) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:

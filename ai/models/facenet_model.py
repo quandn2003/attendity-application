@@ -404,7 +404,7 @@ def load_weights(mdl, name):
         download_url_to_file(path, cached_file)
 
     logger.info(f"Loading pretrained weights from {cached_file}")
-    state_dict = torch.load(cached_file, map_location='cpu')
+    state_dict = torch.load(cached_file, map_location='cpu', weights_only=False)
     mdl.load_state_dict(state_dict)
 
 class FaceNetModel:
@@ -442,7 +442,7 @@ class FaceNetModel:
             if model_path or self.config.model_path:
                 path = model_path or self.config.model_path
                 logger.info(f"Loading custom model from {path}")
-                checkpoint = torch.load(path, map_location=self.device)
+                checkpoint = torch.load(path, map_location=self.device, weights_only=False)
                 if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
                     self.model.load_state_dict(checkpoint['state_dict'])
                 else:
