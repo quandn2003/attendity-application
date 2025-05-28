@@ -195,13 +195,21 @@ class LFWTripletTrainer:
     
     def evaluate_pairs(self, pairs_file: str, dataset_name: str) -> float:
         """Evaluate model on pairs dataset"""
+        # Extract just the filename from the full path
+        pairs_filename = os.path.basename(pairs_file)
+        
         dataset = LFWPairDataset(
             data_dir=self.config['data_dir'],
-            pairs_file=pairs_file,
+            pairs_file=pairs_filename,
             target_size=(160, 160),
             face_detector=SsdResNetDetector(confidence_threshold=0.5),
             normalization="Facenet2018"
         )
+        
+        # Check if dataset is empty
+        if len(dataset) == 0:
+            print(f"Warning: {dataset_name} dataset is empty, skipping evaluation")
+            return 0.0
         
         dataloader = DataLoader(
             dataset,
@@ -228,6 +236,11 @@ class LFWTripletTrainer:
                 embeddings1.append(emb1)
                 embeddings2.append(emb2)
                 labels.append(batch_labels)
+        
+        # Check if we have any valid samples
+        if not embeddings1:
+            print(f"Warning: No valid samples found in {dataset_name} dataset")
+            return 0.0
         
         embeddings1 = np.vstack(embeddings1)
         embeddings2 = np.vstack(embeddings2)
